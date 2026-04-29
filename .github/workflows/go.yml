@@ -1,0 +1,62 @@
+name: Go
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  golangci:
+    name: Go Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: ./go.mod
+
+      - name: Set up Golang build cache
+        uses: actions/cache@v5
+        with:
+          path:  ~/.cache/go-build
+          key: ${{ runner.os }}-golang-golangci-lint-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-golang-
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+
+  test:
+    runs-on: ubuntu-latest
+    name: Go Test
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: ./go.mod
+
+      - name: Set up Golang build cache
+        uses: actions/cache@v5
+        with:
+          path:  ~/.cache/go-build
+          key: ${{ runner.os }}-golang-test-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-golang-
+
+      - name: Download go modules
+        run: go mod download
+
+      - name: Test
+        uses: robherley/go-test-action@v1
