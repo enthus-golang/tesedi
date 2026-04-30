@@ -30,7 +30,7 @@ func main() {
 		"YOUR_API_KEY",
 	)
 
-	contract, err := client.GetContractByNumber(context.Background(), "2137277728")
+	contract, err := client.GetContractByNumber(context.Background(), "FAKE-CONTRACT-0001")
 	if err != nil {
 		log.Fatal(err)
 	}
