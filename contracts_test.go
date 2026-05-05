@@ -33,7 +33,6 @@ const sampleAssetsPage = `{
 func TestSearchContracts_PassesQueryParams(t *testing.T) {
 	var capturedQuery string
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", nil))
 	mux.HandleFunc("/api/contracts", func(w http.ResponseWriter, r *http.Request) {
 		capturedQuery = r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
@@ -41,7 +40,7 @@ func TestSearchContracts_PassesQueryParams(t *testing.T) {
 	})
 	server := startServer(t, mux)
 
-	c := New(server.URL+"/api", server.URL+"/auth", "k", WithRetry(1, 0))
+	c := New(server.URL+"/api", "k", WithRetry(1, 0))
 	_, err := c.SearchContracts(context.Background(), "abc", &ListOptions{
 		Limit:     25,
 		Cursor:    "X:Y",
@@ -60,14 +59,13 @@ func TestSearchContracts_PassesQueryParams(t *testing.T) {
 func TestSearchContracts_EmptyQueryOmitsSearchParam(t *testing.T) {
 	var capturedQuery string
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", nil))
 	mux.HandleFunc("/api/contracts", func(w http.ResponseWriter, r *http.Request) {
 		capturedQuery = r.URL.RawQuery
 		_, _ = w.Write([]byte(`{"data":[],"meta":{"hasNextPage":false,"nextCursor":""}}`))
 	})
 	server := startServer(t, mux)
 
-	c := New(server.URL+"/api", server.URL+"/auth", "k", WithRetry(1, 0))
+	c := New(server.URL+"/api", "k", WithRetry(1, 0))
 	_, err := c.SearchContracts(context.Background(), "", nil)
 	require.NoError(t, err)
 	assert.NotContains(t, capturedQuery, "search=")
@@ -75,7 +73,6 @@ func TestSearchContracts_EmptyQueryOmitsSearchParam(t *testing.T) {
 
 func TestSearchContracts_DecodesPage(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", nil))
 	mux.HandleFunc("/api/contracts", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
@@ -91,7 +88,7 @@ func TestSearchContracts_DecodesPage(t *testing.T) {
 	})
 	server := startServer(t, mux)
 
-	c := New(server.URL+"/api", server.URL+"/auth", "k", WithRetry(1, 0))
+	c := New(server.URL+"/api", "k", WithRetry(1, 0))
 	page, err := c.SearchContracts(context.Background(), "any", nil)
 	require.NoError(t, err)
 	require.Len(t, page.Data, 1)
@@ -104,7 +101,6 @@ func TestSearchContracts_DecodesPage(t *testing.T) {
 
 func TestGetContractByNumber_ExactMatch(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", nil))
 	mux.HandleFunc("/api/contracts", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{
             "data": [
@@ -117,7 +113,7 @@ func TestGetContractByNumber_ExactMatch(t *testing.T) {
 	})
 	server := startServer(t, mux)
 
-	c := New(server.URL+"/api", server.URL+"/auth", "k", WithRetry(1, 0))
+	c := New(server.URL+"/api", "k", WithRetry(1, 0))
 	got, err := c.GetContractByNumber(context.Background(), "FAKE-CONTRACT-0001")
 	require.NoError(t, err)
 	assert.Equal(t, "2", got.ContractID)
@@ -125,13 +121,12 @@ func TestGetContractByNumber_ExactMatch(t *testing.T) {
 
 func TestGetContractByNumber_NotFound(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", nil))
 	mux.HandleFunc("/api/contracts", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[],"meta":{"hasNextPage":false,"nextCursor":""}}`))
 	})
 	server := startServer(t, mux)
 
-	c := New(server.URL+"/api", server.URL+"/auth", "k", WithRetry(1, 0))
+	c := New(server.URL+"/api", "k", WithRetry(1, 0))
 	_, err := c.GetContractByNumber(context.Background(), "missing")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrContractNotFound))
@@ -139,7 +134,6 @@ func TestGetContractByNumber_NotFound(t *testing.T) {
 
 func TestGetContractByNumber_NoExactMatchInFuzzyResults(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", nil))
 	mux.HandleFunc("/api/contracts", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{
             "data": [
@@ -151,7 +145,7 @@ func TestGetContractByNumber_NoExactMatchInFuzzyResults(t *testing.T) {
 	})
 	server := startServer(t, mux)
 
-	c := New(server.URL+"/api", server.URL+"/auth", "k", WithRetry(1, 0))
+	c := New(server.URL+"/api", "k", WithRetry(1, 0))
 	_, err := c.GetContractByNumber(context.Background(), "abc-12")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrContractNotFound))
@@ -159,7 +153,6 @@ func TestGetContractByNumber_NoExactMatchInFuzzyResults(t *testing.T) {
 
 func TestGetContractByNumber_Ambiguous(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", nil))
 	mux.HandleFunc("/api/contracts", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{
             "data": [
@@ -171,7 +164,7 @@ func TestGetContractByNumber_Ambiguous(t *testing.T) {
 	})
 	server := startServer(t, mux)
 
-	c := New(server.URL+"/api", server.URL+"/auth", "k", WithRetry(1, 0))
+	c := New(server.URL+"/api", "k", WithRetry(1, 0))
 	_, err := c.GetContractByNumber(context.Background(), "DUPLICATE")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrAmbiguousContractNumber))
@@ -179,7 +172,6 @@ func TestGetContractByNumber_Ambiguous(t *testing.T) {
 
 func TestGetContract_DecodesWrapper(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", nil))
 	mux.HandleFunc("/api/contracts/99999", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{
             "data": {
@@ -192,7 +184,7 @@ func TestGetContract_DecodesWrapper(t *testing.T) {
 	})
 	server := startServer(t, mux)
 
-	c := New(server.URL+"/api", server.URL+"/auth", "k", WithRetry(1, 0))
+	c := New(server.URL+"/api", "k", WithRetry(1, 0))
 	got, err := c.GetContract(context.Background(), "99999")
 	require.NoError(t, err)
 	assert.Equal(t, "99999", got.ContractID)
@@ -204,7 +196,6 @@ func TestGetContract_DecodesWrapper(t *testing.T) {
 func TestGetContract_PathEscape(t *testing.T) {
 	var capturedURI string
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", nil))
 	mux.Handle("/api/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// RequestURI is the raw path as received on the wire, before Go's URL
 		// decoding rewrites %2F into '/' on r.URL.Path.
@@ -213,7 +204,7 @@ func TestGetContract_PathEscape(t *testing.T) {
 	}))
 	server := startServer(t, mux)
 
-	c := New(server.URL+"/api", server.URL+"/auth", "k", WithRetry(1, 0))
+	c := New(server.URL+"/api", "k", WithRetry(1, 0))
 	_, err := c.GetContract(context.Background(), "abc/def")
 	require.NoError(t, err)
 	assert.Equal(t, "/api/contracts/abc%2Fdef", capturedURI)
@@ -221,13 +212,12 @@ func TestGetContract_PathEscape(t *testing.T) {
 
 func TestGetContractAssets_DecodesAssets(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", nil))
 	mux.HandleFunc("/api/contracts/99999/assets", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(sampleAssetsPage))
 	})
 	server := startServer(t, mux)
 
-	c := New(server.URL+"/api", server.URL+"/auth", "k", WithRetry(1, 0))
+	c := New(server.URL+"/api", "k", WithRetry(1, 0))
 	page, err := c.GetContractAssets(context.Background(), "99999", nil)
 	require.NoError(t, err)
 
@@ -248,14 +238,13 @@ func TestGetContractAssets_DecodesAssets(t *testing.T) {
 func TestGetContractAssets_PassesPagination(t *testing.T) {
 	var capturedQuery string
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", nil))
 	mux.HandleFunc("/api/contracts/1/assets", func(w http.ResponseWriter, r *http.Request) {
 		capturedQuery = r.URL.RawQuery
 		_, _ = w.Write([]byte(`{"data":[],"meta":{"hasNextPage":false,"nextCursor":""}}`))
 	})
 	server := startServer(t, mux)
 
-	c := New(server.URL+"/api", server.URL+"/auth", "k", WithRetry(1, 0))
+	c := New(server.URL+"/api", "k", WithRetry(1, 0))
 	_, err := c.GetContractAssets(context.Background(), "1", &ListOptions{Limit: 10, Cursor: "abc"})
 	require.NoError(t, err)
 	assert.Contains(t, capturedQuery, "limit=10")
@@ -266,13 +255,12 @@ func TestGetContractAssets_PassesPagination(t *testing.T) {
 // timeout cap on retries isn't honored.
 func TestSearchContracts_RetryRespectsContextDeadline(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", nil))
 	mux.HandleFunc("/api/contracts", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "boom", http.StatusInternalServerError)
 	})
 	server := startServer(t, mux)
 
-	c := New(server.URL+"/api", server.URL+"/auth", "k", WithRetry(20, 100*time.Millisecond))
+	c := New(server.URL+"/api", "k", WithRetry(20, 100*time.Millisecond))
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	_, err := c.SearchContracts(ctx, "anything", nil)

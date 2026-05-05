@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -19,7 +18,6 @@ import (
 // goroutines.
 type Client struct {
 	baseURL string
-	authURL string
 	apiKey  string
 
 	httpClient  *http.Client
@@ -29,24 +27,19 @@ type Client struct {
 	maxAttempts int
 	baseBackoff time.Duration
 	logger      Logger
-
-	tokenMu     sync.Mutex
-	token       string
-	tokenExpiry time.Time
 }
 
 // New creates a Tesedi API client.
 //
 // baseURL is the API root, e.g. "https://example.tesedi.com/api".
-// authURL is the token-exchange endpoint, e.g. "https://example.tesedi.com/auth".
-// apiKey is the static key sent on the auth request as the "apiKey" header.
+// apiKey is the static partner key sent on every request as the
+// "x-api-key" header (per the Asset Hub Partner API spec).
 //
-// All three arguments are required; this constructor does not validate them
+// Both arguments are required; this constructor does not validate them
 // — instead, the first call needing them surfaces any errors.
-func New(baseURL, authURL, apiKey string, opts ...Option) *Client {
+func New(baseURL, apiKey string, opts ...Option) *Client {
 	c := &Client{
 		baseURL:     baseURL,
-		authURL:     authURL,
 		apiKey:      apiKey,
 		httpClient:  &http.Client{Timeout: 30 * time.Second},
 		maxAttempts: 3,
@@ -58,9 +51,9 @@ func New(baseURL, authURL, apiKey string, opts ...Option) *Client {
 	return c
 }
 
-// do performs an authenticated GET request, applying rate limits and retries.
-// path is appended to baseURL. query may be nil. On success, the caller owns
-// the response body and must close it. Non-2xx responses are surfaced as
+// do performs a GET request, applying rate limits and retries. path is
+// appended to baseURL. query may be nil. On success, the caller owns the
+// response body and must close it. Non-2xx responses are surfaced as
 // *APIError after the body is read and closed.
 func (c *Client) do(ctx context.Context, method, path string, query url.Values) (*http.Response, error) {
 	if c.minLimiter != nil {
@@ -74,25 +67,18 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values) 
 		}
 	}
 
-	if err := c.authenticate(ctx); err != nil {
-		return nil, err
-	}
-
 	fullURL := c.baseURL + path
 	if len(query) > 0 {
 		fullURL += "?" + query.Encode()
 	}
 
-	authRetried := false
 	var lastErr error
 	for attempt := 1; attempt <= c.maxAttempts; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, method, fullURL, nil)
 		if err != nil {
 			return nil, fmt.Errorf("tesedi: build request: %w", err)
 		}
-		c.tokenMu.Lock()
-		req.Header.Set("Authorization", "Bearer "+c.token)
-		c.tokenMu.Unlock()
+		req.Header.Set("x-api-key", c.apiKey)
 		req.Header.Set("Accept", "application/json")
 
 		resp, doErr := c.httpClient.Do(req)
@@ -114,18 +100,6 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values) 
 		_ = resp.Body.Close()
 		apiErr := &APIError{StatusCode: resp.StatusCode, Body: string(body)}
 		lastErr = apiErr
-
-		// Single attempt to refresh the token on 401, in case the upstream
-		// session expired earlier than our cached expiry suggested.
-		if resp.StatusCode == http.StatusUnauthorized && !authRetried {
-			authRetried = true
-			c.invalidateToken()
-			if err := c.authenticate(ctx); err != nil {
-				return nil, err
-			}
-			attempt-- // do not count the reauth toward maxAttempts
-			continue
-		}
 
 		if !c.shouldRetry(attempt, resp.StatusCode, false) {
 			return nil, apiErr

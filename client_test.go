@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,7 +17,7 @@ import (
 )
 
 func TestNew_Defaults(t *testing.T) {
-	c := New("https://api.example", "https://auth.example", "key")
+	c := New("https://api.example", "key")
 
 	require.NotNil(t, c.httpClient)
 	assert.Equal(t, 30*time.Second, c.httpClient.Timeout)
@@ -33,7 +32,7 @@ func TestNew_Options(t *testing.T) {
 	customHTTP := &http.Client{Timeout: 5 * time.Second}
 	customLogger := log.New(io.Discard, "", 0)
 
-	c := New("https://api.example", "https://auth.example", "key",
+	c := New("https://api.example", "key",
 		WithHTTPClient(customHTTP),
 		WithRateLimit(60, 3600),
 		WithRetry(7, 100*time.Millisecond),
@@ -49,26 +48,40 @@ func TestNew_Options(t *testing.T) {
 }
 
 func TestNew_NilHTTPClientIgnored(t *testing.T) {
-	c := New("https://api.example", "https://auth.example", "key", WithHTTPClient(nil))
+	c := New("https://api.example", "key", WithHTTPClient(nil))
 	assert.NotNil(t, c.httpClient)
 	assert.Equal(t, 30*time.Second, c.httpClient.Timeout)
 }
 
 func TestNew_RateLimitZeroDisables(t *testing.T) {
-	c := New("https://api.example", "https://auth.example", "key", WithRateLimit(0, 10))
+	c := New("https://api.example", "key", WithRateLimit(0, 10))
 	assert.Nil(t, c.minLimiter)
 	assert.NotNil(t, c.hourLimiter)
 }
 
 func TestNew_RetryAttemptsClampedToOne(t *testing.T) {
-	c := New("https://api.example", "https://auth.example", "key", WithRetry(0, time.Second))
+	c := New("https://api.example", "key", WithRetry(0, time.Second))
 	assert.Equal(t, 1, c.maxAttempts)
+}
+
+func TestDo_SendsXAPIKeyHeader(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/contracts/1", func(w http.ResponseWriter, r *http.Request) {
+		require.True(t, requireAPIKey(r, "k"), "expected x-api-key header")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"contractId":"1","contractNumber":"X"}}`))
+	})
+	server := startServer(t, mux)
+
+	c := New(server.URL+"/api", "k", WithRetry(1, 0))
+	contract, err := c.GetContract(context.Background(), "1")
+	require.NoError(t, err)
+	assert.Equal(t, "X", contract.ContractNumber)
 }
 
 func TestDo_Retry5xxThenSuccess(t *testing.T) {
 	var apiCalls atomic.Int32
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", nil))
 	mux.HandleFunc("/api/contracts/1", func(w http.ResponseWriter, r *http.Request) {
 		n := apiCalls.Add(1)
 		if n < 3 {
@@ -80,7 +93,7 @@ func TestDo_Retry5xxThenSuccess(t *testing.T) {
 	})
 	server := startServer(t, mux)
 
-	c := New(server.URL+"/api", server.URL+"/auth", "k", WithRetry(5, time.Millisecond))
+	c := New(server.URL+"/api", "k", WithRetry(5, time.Millisecond))
 	contract, err := c.GetContract(context.Background(), "1")
 	require.NoError(t, err)
 	assert.Equal(t, "X", contract.ContractNumber)
@@ -90,14 +103,13 @@ func TestDo_Retry5xxThenSuccess(t *testing.T) {
 func TestDo_MaxAttemptsExhausted(t *testing.T) {
 	var apiCalls atomic.Int32
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", nil))
 	mux.HandleFunc("/api/contracts/1", func(w http.ResponseWriter, r *http.Request) {
 		apiCalls.Add(1)
 		http.Error(w, "still down", http.StatusServiceUnavailable)
 	})
 	server := startServer(t, mux)
 
-	c := New(server.URL+"/api", server.URL+"/auth", "k", WithRetry(3, time.Millisecond))
+	c := New(server.URL+"/api", "k", WithRetry(3, time.Millisecond))
 	_, err := c.GetContract(context.Background(), "1")
 	require.Error(t, err)
 
@@ -110,74 +122,46 @@ func TestDo_MaxAttemptsExhausted(t *testing.T) {
 func TestDo_NoRetryOn4xx(t *testing.T) {
 	var apiCalls atomic.Int32
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", nil))
 	mux.HandleFunc("/api/contracts/1", func(w http.ResponseWriter, r *http.Request) {
 		apiCalls.Add(1)
 		http.Error(w, "nope", http.StatusBadRequest)
 	})
 	server := startServer(t, mux)
 
-	c := New(server.URL+"/api", server.URL+"/auth", "k", WithRetry(5, time.Millisecond))
+	c := New(server.URL+"/api", "k", WithRetry(5, time.Millisecond))
 	_, err := c.GetContract(context.Background(), "1")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, errors.New("dummy")) == false) // sanity
 	assert.EqualValues(t, 1, apiCalls.Load())
 }
 
 func TestDo_404MapsToErrNotFound(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", nil))
 	mux.HandleFunc("/api/contracts/1", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing", http.StatusNotFound)
 	})
 	server := startServer(t, mux)
 
-	c := New(server.URL+"/api", server.URL+"/auth", "k", WithRetry(1, 0))
+	c := New(server.URL+"/api", "k", WithRetry(1, 0))
 	_, err := c.GetContract(context.Background(), "1")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNotFound))
 }
 
-func TestDo_401TriggersReauthAndSucceeds(t *testing.T) {
-	var apiCalls atomic.Int32
-	authCalls := 0
-	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", &authCalls))
-	mux.HandleFunc("/api/contracts/1", func(w http.ResponseWriter, r *http.Request) {
-		n := apiCalls.Add(1)
-		if n == 1 {
-			http.Error(w, "expired", http.StatusUnauthorized)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"contractId":"1","contractNumber":"X"}}`))
-	})
-	server := startServer(t, mux)
-
-	c := New(server.URL+"/api", server.URL+"/auth", "k", WithRetry(1, 0))
-	contract, err := c.GetContract(context.Background(), "1")
-	require.NoError(t, err)
-	assert.Equal(t, "X", contract.ContractNumber)
-	assert.EqualValues(t, 2, apiCalls.Load())
-	assert.Equal(t, 2, authCalls, "expected one reauth after the 401")
-}
-
-func TestDo_PersistentUnauthorizedReturnsErr(t *testing.T) {
+func TestDo_401MapsToErrUnauthorized(t *testing.T) {
 	var apiCalls atomic.Int32
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", nil))
 	mux.HandleFunc("/api/contracts/1", func(w http.ResponseWriter, r *http.Request) {
 		apiCalls.Add(1)
 		http.Error(w, "denied", http.StatusUnauthorized)
 	})
 	server := startServer(t, mux)
 
-	c := New(server.URL+"/api", server.URL+"/auth", "k", WithRetry(1, 0))
+	c := New(server.URL+"/api", "bad-key", WithRetry(1, 0))
 	_, err := c.GetContract(context.Background(), "1")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthorized))
-	// 1 initial + 1 reauth retry = 2 calls
-	assert.EqualValues(t, 2, apiCalls.Load())
+	// 401 is a 4xx — no retry.
+	assert.EqualValues(t, 1, apiCalls.Load())
 }
 
 func TestDo_429HonorsRetryAfter(t *testing.T) {
@@ -185,7 +169,6 @@ func TestDo_429HonorsRetryAfter(t *testing.T) {
 	var firstAt time.Time
 	var secondAt time.Time
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", nil))
 	mux.HandleFunc("/api/contracts/1", func(w http.ResponseWriter, r *http.Request) {
 		n := apiCalls.Add(1)
 		if n == 1 {
@@ -200,7 +183,7 @@ func TestDo_429HonorsRetryAfter(t *testing.T) {
 	})
 	server := startServer(t, mux)
 
-	c := New(server.URL+"/api", server.URL+"/auth", "k", WithRetry(2, time.Millisecond))
+	c := New(server.URL+"/api", "k", WithRetry(2, time.Millisecond))
 	_, err := c.GetContract(context.Background(), "1")
 	require.NoError(t, err)
 	require.False(t, firstAt.IsZero())
@@ -210,10 +193,8 @@ func TestDo_429HonorsRetryAfter(t *testing.T) {
 }
 
 func TestDo_NetworkErrorRetries(t *testing.T) {
-	// Set up a server that closes the connection on first request, then succeeds.
 	var apiCalls atomic.Int32
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", nil))
 	mux.HandleFunc("/api/contracts/1", func(w http.ResponseWriter, r *http.Request) {
 		n := apiCalls.Add(1)
 		if n == 1 {
@@ -231,7 +212,7 @@ func TestDo_NetworkErrorRetries(t *testing.T) {
 	})
 	server := startServer(t, mux)
 
-	c := New(server.URL+"/api", server.URL+"/auth", "k", WithRetry(3, time.Millisecond))
+	c := New(server.URL+"/api", "k", WithRetry(3, time.Millisecond))
 	contract, err := c.GetContract(context.Background(), "1")
 	require.NoError(t, err)
 	assert.Equal(t, "X", contract.ContractNumber)
@@ -241,7 +222,6 @@ func TestDo_NetworkErrorRetries(t *testing.T) {
 func TestDo_ContextCanceledStopsRetry(t *testing.T) {
 	var apiCalls atomic.Int32
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", nil))
 	mux.HandleFunc("/api/contracts/1", func(w http.ResponseWriter, r *http.Request) {
 		apiCalls.Add(1)
 		http.Error(w, "boom", http.StatusInternalServerError)
@@ -249,7 +229,7 @@ func TestDo_ContextCanceledStopsRetry(t *testing.T) {
 	server := startServer(t, mux)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	c := New(server.URL+"/api", server.URL+"/auth", "k", WithRetry(10, 50*time.Millisecond))
+	c := New(server.URL+"/api", "k", WithRetry(10, 50*time.Millisecond))
 	go func() {
 		time.Sleep(20 * time.Millisecond)
 		cancel()
@@ -259,7 +239,7 @@ func TestDo_ContextCanceledStopsRetry(t *testing.T) {
 }
 
 func TestComputeBackoff_BoundedAndJittered(t *testing.T) {
-	c := New("https://api.example", "https://auth.example", "key", WithRetry(10, time.Second))
+	c := New("https://api.example", "key", WithRetry(10, time.Second))
 	// Jitter can extend the backoff by up to 25% above the 30s cap, hence 38s.
 	for attempt := 1; attempt <= 8; attempt++ {
 		d := c.computeBackoff(attempt)
@@ -279,13 +259,12 @@ func (l *recordingLogger) Printf(format string, args ...any) {
 func TestWithLogger_RecordsRetryEvents(t *testing.T) {
 	logger := &recordingLogger{}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", validAuthHandler(t, "k", nil))
 	mux.HandleFunc("/api/contracts/1", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "boom", http.StatusServiceUnavailable)
 	})
 	server := startServer(t, mux)
 
-	c := New(server.URL+"/api", server.URL+"/auth", "k",
+	c := New(server.URL+"/api", "k",
 		WithRetry(2, time.Millisecond),
 		WithLogger(logger),
 	)
@@ -299,7 +278,7 @@ func TestAPIError_ErrorMessageFormat(t *testing.T) {
 }
 
 func TestSleepFor_RespectsContext(t *testing.T) {
-	c := New("https://api.example", "https://auth.example", "key")
+	c := New("https://api.example", "key")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	start := time.Now()
@@ -328,6 +307,3 @@ func TestDecode_BadJSON(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "decode response")
 }
-
-// silence unused import warning if helper changes.
-var _ = strconv.Itoa

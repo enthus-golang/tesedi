@@ -26,7 +26,6 @@ import (
 func main() {
 	client := tesedi.New(
 		"https://example.tesedi.com/api",
-		"https://example.tesedi.com/auth",
 		"YOUR_API_KEY",
 	)
 
@@ -51,7 +50,7 @@ func main() {
 ## Options
 
 ```go
-client := tesedi.New(baseURL, authURL, apiKey,
+client := tesedi.New(baseURL, apiKey,
 	tesedi.WithHTTPClient(myHTTPClient),
 	tesedi.WithRateLimit(60, 3600),    // requests per minute, per hour (0 = unlimited)
 	tesedi.WithRetry(3, 500*time.Millisecond), // max attempts, base backoff
