@@ -15,8 +15,8 @@ type Contract struct {
 	Reseller        string  `json:"reseller"`
 	EndCustomerName string  `json:"endCustomerName"`
 	EndCustomerID   string  `json:"endCustomerId"`
-	StartDate       string  `json:"startDate"` // YYYY-MM-DD
-	EndDate         string  `json:"endDate"`   // YYYY-MM-DD
+	StartDate       Date    `json:"startDate"`
+	EndDate         Date    `json:"endDate"`
 	ResellerPrice   float64 `json:"resellerPrice"`
 	RetailPrice     float64 `json:"retailPrice"`
 	Currency        string  `json:"currency"`
@@ -31,8 +31,8 @@ type Asset struct {
 	ServiceGroup    string         `json:"serviceGroup"`
 	ServiceLevels   []ServiceLevel `json:"serviceLevels"`
 	RetailPrice     *float64       `json:"retailPrice"`
-	StartDate       string         `json:"startDate"`
-	EndDate         string         `json:"endDate"`
+	StartDate       Date           `json:"startDate"`
+	EndDate         Date           `json:"endDate"`
 }
 
 // ServiceLevel describes one component of an asset's service group.
