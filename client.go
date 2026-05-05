@@ -51,7 +51,7 @@ func New(baseURL, apiKey string, opts ...Option) *Client {
 	return c
 }
 
-// do performs a GET request, applying rate limits and retries. path is
+// do performs an HTTP request, applying rate limits and retries. path is
 // appended to baseURL. query may be nil. On success, the caller owns the
 // response body and must close it. Non-2xx responses are surfaced as
 // *APIError after the body is read and closed.
