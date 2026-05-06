@@ -98,6 +98,7 @@ func TestSearchContracts_DecodesPage(t *testing.T) {
 	assert.Equal(t, "99999", page.Data[0].ContractID)
 	assert.Equal(t, "FAKE-CONTRACT-0001", page.Data[0].ContractNumber)
 	assert.Equal(t, "AcmeVendor", page.Data[0].Vendor)
+	assert.True(t, time.Date(2026, time.April, 30, 0, 0, 0, 0, time.UTC).Equal(page.Data[0].EndDate.Time))
 	assert.True(t, page.Meta.HasNextPage)
 	assert.Equal(t, "2027-12-31:99999", page.Meta.NextCursor)
 }
@@ -198,6 +199,7 @@ func TestGetContract_DecodesWrapper(t *testing.T) {
 	assert.Equal(t, "99999", got.ContractID)
 	assert.Equal(t, "FAKE-CONTRACT-0001", got.ContractNumber)
 	assert.Equal(t, "Active", got.Status)
+	assert.True(t, time.Date(2026, time.April, 30, 0, 0, 0, 0, time.UTC).Equal(got.EndDate.Time))
 	assert.Empty(t, got.Vendor, "GetContract response is documented not to include vendor")
 }
 
@@ -239,7 +241,8 @@ func TestGetContractAssets_DecodesAssets(t *testing.T) {
 	require.Len(t, a.ServiceLevels, 1)
 	assert.Equal(t, "FAKE-LEVEL-AC", a.ServiceLevels[0].ServiceLevelSKU)
 	assert.Nil(t, a.RetailPrice)
-	assert.Equal(t, "2027-12-31", a.EndDate)
+	assert.True(t, time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC).Equal(a.StartDate.Time))
+	assert.True(t, time.Date(2027, time.December, 31, 0, 0, 0, 0, time.UTC).Equal(a.EndDate.Time))
 
 	assert.True(t, page.Meta.HasNextPage)
 	assert.Equal(t, "3", page.Meta.NextCursor)
